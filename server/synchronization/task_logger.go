@@ -3,6 +3,7 @@ package synchronization
 import (
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"sync"
 
@@ -16,42 +17,55 @@ const (
 	singerSystem = "Singer"
 )
 
-//TaskLogger is a logger for writing logs to underlying Redis (meta.Storage)
+// TaskLogger is a logger for writing logs to underlying Redis (meta.Storage)
 type TaskLogger struct {
 	taskID           string
 	metaStorage      meta.Storage
 	buf              []string
 	mu               sync.Mutex
 	sourcesLogWriter io.Writer
+	minLogLevel      logging.Level
 }
 
-//NewTaskLogger returns configured TaskLogger instance
+// NewTaskLogger returns configured TaskLogger instance
 func NewTaskLogger(taskID string, metaStorage meta.Storage, sourcesLogWriter io.Writer) *TaskLogger {
-	return &TaskLogger{taskID: taskID, metaStorage: metaStorage, buf: make([]string, 0), sourcesLogWriter: sourcesLogWriter}
+	minLogLevel := logging.ToLevel(os.Getenv("TASK_MIN_LOG_LEVEL"))
+
+	return &TaskLogger{
+		taskID:           taskID,
+		metaStorage:      metaStorage,
+		buf:              make([]string, 0),
+		sourcesLogWriter: sourcesLogWriter,
+		minLogLevel:      minLogLevel,
+	}
 }
 
-//Write writes Singer bytes as a record into meta.Storage
+// Write writes Singer bytes as a record into meta.Storage
 func (tl *TaskLogger) Write(p []byte) (n int, err error) {
 	tl.LOG(string(p), singerSystem, logging.DEBUG)
 	return len(p), nil
 }
 
-//INFO writes record into meta.storage with log level INFO
+// INFO writes record into meta.storage with log level INFO
 func (tl *TaskLogger) INFO(format string, v ...interface{}) {
 	tl.LOG(format, jitsuSystem, logging.INFO, v...)
 }
 
-//ERROR writes record into meta.storage with log level ERROR
+// ERROR writes record into meta.storage with log level ERROR
 func (tl *TaskLogger) ERROR(format string, v ...interface{}) {
 	tl.LOG(format, jitsuSystem, logging.ERROR, v...)
 }
 
-//WARN writes record into meta.storage with log level WARN
+// WARN writes record into meta.storage with log level WARN
 func (tl *TaskLogger) WARN(format string, v ...interface{}) {
 	tl.LOG(format, jitsuSystem, logging.WARN, v...)
 }
 
 func (tl *TaskLogger) LOG(format, system string, level logging.Level, v ...interface{}) {
+	if level < tl.minLogLevel {
+		return
+	}
+
 	msg := "[" + tl.taskID + "] " + fmt.Sprintf(format, v...)
 	tl.sourcesLogWriter.Write([]byte(fmt.Sprintf("%s [%s]: [task:%s]: %s\n", timestamp.Now().UTC().Format(timestamp.LogsLayout), strings.ToUpper(level.String()), tl.taskID, fmt.Sprintf(format, v...))))
 

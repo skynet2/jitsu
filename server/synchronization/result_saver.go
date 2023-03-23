@@ -4,6 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
+
+	"github.com/joomcode/errorx"
+	"github.com/spf13/viper"
+
 	"github.com/jitsucom/jitsu/server/adapters"
 	"github.com/jitsucom/jitsu/server/counters"
 	driversbase "github.com/jitsucom/jitsu/server/drivers/base"
@@ -19,10 +25,6 @@ import (
 	"github.com/jitsucom/jitsu/server/typing"
 	"github.com/jitsucom/jitsu/server/utils"
 	"github.com/jitsucom/jitsu/server/uuid"
-	"github.com/joomcode/errorx"
-	"github.com/spf13/viper"
-	"strings"
-	"time"
 )
 
 // ResultSaver is a Singer/Airbyte result consumer
@@ -137,7 +139,7 @@ func (rs *ResultSaver) Consume(representation *driversbase.CLIOutputRepresentati
 			batchStart := timestamp.Now()
 			var err error
 			for i := 0; i < storeAttempts; i++ {
-				rs.taskLogger.INFO("Stream [%s] Flushing batch - adding %d objects to [%s]. Key fields=[%s] Storage=[%s] Attempt: %d of %d", streamName, rowsCount, tableName, strings.Join(keyFields, ","), storage.ID(), i+1, storeAttempts)
+				rs.taskLogger.WARN("Stream [%s] Flushing batch - adding %d objects to [%s]. Key fields=[%s] Storage=[%s] Attempt: %d of %d", streamName, rowsCount, tableName, strings.Join(keyFields, ","), storage.ID(), i+1, storeAttempts)
 				err = storage.SyncStore(stream.BatchHeader, stream.Objects, stream.DeleteConditions, false, needCopyEvent)
 				if err == nil {
 					break
@@ -148,7 +150,7 @@ func (rs *ResultSaver) Consume(representation *driversbase.CLIOutputRepresentati
 			batchLoadTime := timestamp.Now().Sub(batchStart)
 			var replaceTableTime time.Duration
 			if err == nil {
-				rs.taskLogger.INFO("Stream [%s] %d objects stored to [%s]. Columns count: %d. Time: %s, Rows/sec: %.2f. Storage=[%s]", streamName, rowsCount, tableName, len(stream.Objects[0]), batchLoadTime.Round(time.Millisecond), float64(rowsCount)/batchLoadTime.Seconds(), storage.ID())
+				rs.taskLogger.WARN("Stream [%s] %d objects stored to [%s]. Columns count: %d. Time: %s, Rows/sec: %.2f. Storage=[%s]", streamName, rowsCount, tableName, len(stream.Objects[0]), batchLoadTime.Round(time.Millisecond), float64(rowsCount)/batchLoadTime.Seconds(), storage.ID())
 				if stream.SwapWithIntermediateTable && targetTableName != tableName {
 					replaceStart := timestamp.Now()
 					rs.taskLogger.INFO("Stream [%s] Replacing final table: [%s] with content of: [%s]", streamName, targetTableName, tableName)
