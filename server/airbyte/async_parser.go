@@ -4,13 +4,15 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
+	"math"
+	"strings"
+	"time"
+
 	"github.com/jitsucom/jitsu/server/drivers/base"
 	"github.com/jitsucom/jitsu/server/logging"
 	"github.com/jitsucom/jitsu/server/schema"
 	"github.com/jitsucom/jitsu/server/timestamp"
-	"io"
-	"math"
-	"time"
 )
 
 const (
@@ -22,6 +24,12 @@ type asynchronousParser struct {
 	dataConsumer          base.CLIDataConsumer
 	streamsRepresentation map[string]*base.StreamRepresentation
 	logger                logging.TaskLogger
+}
+
+var debugMessages = []string{
+	"Set initial fetch size",
+	"Set new fetch size",
+	"Records read:",
 }
 
 // Parse reads from stdout and:
@@ -67,6 +75,19 @@ func (ap *asynchronousParser) parse(stdout io.Reader) error {
 			if row.Log == nil {
 				return fmt.Errorf("Error parsing airbyte log line %s: 'log' doesn't exist", string(lineBytes))
 			}
+
+			for _, m := range debugMessages {
+				if strings.Contains(row.Log.Message, m) {
+					row.Log.Level = "DEBUG"
+
+					break
+				}
+			}
+
+			if row.Log.Level == "DEBUG" {
+				row.Log.Level = getLevelForRecordsRead(row)
+			}
+
 			switch row.Log.Level {
 			case "ERROR":
 				ap.logger.LOG(row.Log.Message, airbyteSystem, logging.ERROR)
