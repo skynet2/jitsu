@@ -474,7 +474,7 @@ func (te *TaskExecutor) sync(task *meta.Task, taskLogger *TaskLogger, driver dri
 			for _, storage := range destinationStorages {
 				var err error
 				for i := 0; i < storeAttempts; i++ {
-					taskLogger.WARN("Flushing batch - adding %d objects to [%s]. Storage=[%s] Attempt: %d of %d", rowsCount, reformattedTableName, storage.ID(), i+1, storeAttempts)
+					taskLogger.DEBUG("Flushing batch - adding %d objects to [%s]. Storage=[%s] Attempt: %d of %d", rowsCount, reformattedTableName, storage.ID(), i+1, storeAttempts)
 					err = storage.SyncStore(&schema.BatchHeader{TableName: reformattedTableName}, objects, deleteConditions, false, needCopyEvent)
 					if err == nil {
 						break

@@ -61,6 +61,11 @@ func (tl *TaskLogger) WARN(format string, v ...interface{}) {
 	tl.LOG(format, jitsuSystem, logging.WARN, v...)
 }
 
+// DEBUG writes record into meta.storage with log level DEBUG
+func (tl *TaskLogger) DEBUG(format string, v ...interface{}) {
+	tl.LOG(format, jitsuSystem, logging.DEBUG, v...)
+}
+
 func (tl *TaskLogger) LOG(format, system string, level logging.Level, v ...interface{}) {
 	if level < tl.minLogLevel {
 		return

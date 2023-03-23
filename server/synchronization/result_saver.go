@@ -139,7 +139,7 @@ func (rs *ResultSaver) Consume(representation *driversbase.CLIOutputRepresentati
 			batchStart := timestamp.Now()
 			var err error
 			for i := 0; i < storeAttempts; i++ {
-				rs.taskLogger.WARN("Stream [%s] Flushing batch - adding %d objects to [%s]. Key fields=[%s] Storage=[%s] Attempt: %d of %d", streamName, rowsCount, tableName, strings.Join(keyFields, ","), storage.ID(), i+1, storeAttempts)
+				rs.taskLogger.DEBUG("Stream [%s] Flushing batch - adding %d objects to [%s]. Key fields=[%s] Storage=[%s] Attempt: %d of %d", streamName, rowsCount, tableName, strings.Join(keyFields, ","), storage.ID(), i+1, storeAttempts)
 				err = storage.SyncStore(stream.BatchHeader, stream.Objects, stream.DeleteConditions, false, needCopyEvent)
 				if err == nil {
 					break
@@ -150,7 +150,7 @@ func (rs *ResultSaver) Consume(representation *driversbase.CLIOutputRepresentati
 			batchLoadTime := timestamp.Now().Sub(batchStart)
 			var replaceTableTime time.Duration
 			if err == nil {
-				rs.taskLogger.WARN("Stream [%s] %d objects stored to [%s]. Columns count: %d. Time: %s, Rows/sec: %.2f. Storage=[%s]", streamName, rowsCount, tableName, len(stream.Objects[0]), batchLoadTime.Round(time.Millisecond), float64(rowsCount)/batchLoadTime.Seconds(), storage.ID())
+				rs.taskLogger.DEBUG("Stream [%s] %d objects stored to [%s]. Columns count: %d. Time: %s, Rows/sec: %.2f. Storage=[%s]", streamName, rowsCount, tableName, len(stream.Objects[0]), batchLoadTime.Round(time.Millisecond), float64(rowsCount)/batchLoadTime.Seconds(), storage.ID())
 				if stream.SwapWithIntermediateTable && targetTableName != tableName {
 					replaceStart := timestamp.Now()
 					rs.taskLogger.INFO("Stream [%s] Replacing final table: [%s] with content of: [%s]", streamName, targetTableName, tableName)
