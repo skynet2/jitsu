@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
 only_jitsu_flag='false'
 
@@ -47,7 +47,7 @@ echo "=    Building jitsucom/jitsu docker...     ="
 echo "============================================"
 echo ""
 
-(cd docker; docker build -t jitsucom/jitsu .) || { echo 'Building jitsucom/jitsu docker failed' ; exit 1; }
+(cd docker; docker build -t skydev/jitsu:1.44.0 .) || { echo 'Building jitsucom/jitsu docker failed' ; exit 1; }
 
 echo ""
 echo "============================================"
