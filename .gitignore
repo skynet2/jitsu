@@ -29,3 +29,7 @@ configurator/backend/openapi/*
 configurator/build/*
 server/venv
 server/airbyte_config
+
+javascript-sdk/
+
+configurator/frontend/main/public/app-version.json
