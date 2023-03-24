@@ -37,7 +37,14 @@ func NewAuth0(ssoConfig *SSOConfig) (*Auth0, error) {
 	)
 
 	if err != nil {
-		return nil, err
+		provider, err = oidc.NewProvider(
+			context.Background(),
+			"https://"+ssoConfig.Domain,
+		)
+
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	conf := oauth2.Config{
@@ -95,7 +102,7 @@ func (a *Auth0) GetSSOSession(ctx *gin.Context, code string) (*handlers.SSOSessi
 			Cause:       err,
 		}
 	}
-	
+
 	logging.Infof("Auth0 profile: %+v", profile)
 	email := utils.MapNVLKeys(profile, "", "email").(string)
 	if email == "" {
@@ -113,6 +120,7 @@ func (a *Auth0) GetSSOSession(ctx *gin.Context, code string) (*handlers.SSOSessi
 		UserID:      utils.MapNVLKeys(profile, uuid.New(), "sub", "email").(string),
 		Email:       email,
 		AccessToken: token.AccessToken,
+		Profile:     profile,
 	}, nil
 }
 
