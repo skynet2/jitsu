@@ -4,17 +4,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jitsucom/jitsu/server/adapters"
-	"github.com/jitsucom/jitsu/server/errorj"
-	"github.com/joomcode/errorx"
-	"github.com/spf13/viper"
 	"io"
 	"io/ioutil"
 	"runtime/debug"
 	"strings"
 	"time"
 
+	"github.com/joomcode/errorx"
 	"github.com/spf13/viper"
+
+	"github.com/jitsucom/jitsu/server/adapters"
+	"github.com/jitsucom/jitsu/server/errorj"
 
 	"github.com/panjf2000/ants/v2"
 	"go.uber.org/atomic"
@@ -503,7 +503,7 @@ func (te *TaskExecutor) sync(task *meta.Task, taskLogger *TaskLogger, driver dri
 			for _, storage := range destinationStorages {
 				for i := 0; i < storeAttempts; i++ {
 					err = storage.SyncStore(&schema.BatchHeader{TableName: intermediateTableName}, objects, deleteConditions, false, needCopyEvent)
-					taskLogger.INFO("Flushing batch - adding %d objects to [%s]. Storage=[%s] Attempt: %d of %d", rowsCount, intermediateTableName, storage.ID(), i+1, storeAttempts)
+					taskLogger.DEBUG("Flushing batch - adding %d objects to [%s]. Storage=[%s] Attempt: %d of %d", rowsCount, intermediateTableName, storage.ID(), i+1, storeAttempts)
 					if err == nil {
 						break
 					} else if i < storeAttempts-1 {

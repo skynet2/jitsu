@@ -31,6 +31,7 @@ var debugMessages = []string{
 	"Set new fetch size",
 	"Records read:",
 	"Generated legacy state for",
+	"State report for",
 }
 
 // Parse reads from stdout and:
