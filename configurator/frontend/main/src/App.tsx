@@ -1,6 +1,6 @@
 // @Libs
-import React, { ComponentType, ExoticComponent, useEffect, useState } from "react"
-import { NavLink, Redirect, Route, Switch, useLocation } from "react-router-dom"
+import React, {ComponentType, ExoticComponent, useEffect, useMemo, useState} from "react"
+import {NavLink, Redirect, Route, Switch, useHistory, useLocation} from "react-router-dom"
 import { Button, Card, Typography } from "antd"
 import { useParams } from "react-router"
 import moment from "moment"
@@ -40,6 +40,7 @@ import { Settings } from "./lib/services/UserSettingsService"
 
 // @Styles
 import "./App.less"
+import {ClassicProjectStatus, getJitsuNextEeClient} from "./lib/services/jitsu-next-ee-client";
 // @Unsorted
 
 const ApiKeysRouter = React.lazy(() => import(/* webpackPrefetch: true */ "./lib/components/ApiKeys/ApiKeysRouter"))
@@ -68,12 +69,12 @@ const DownloadConfig = React.lazy(
   () => import(/* webpackPrefetch: true */ "./lib/components/DownloadConfig/DownloadConfig")
 )
 
-export const initializeApplication = async (setDescription: (d: string) => void): Promise<ApplicationServices> => {
+export const initializeApplication = async (setDescription: (d: string) => void, location: any): Promise<ApplicationServices> => {
   const services = ApplicationServices.get()
   await services.init()
   await services.loadPluginScript()
   setDescription("Authenticating...")
-  await services.userService.waitForUser()
+  await services.userService.waitForUser(new URLSearchParams(location.search).get("token"))
   if (services.userService.hasUser()) {
     setDebugInfo("user", services.userService.getUser())
     services.analyticsService.onUserKnown(services.userService.getUser())
@@ -133,11 +134,48 @@ const JitsuPageViewTracker: React.FC<{}> = () => {
 export const Application: React.FC = function () {
   const [services, setServices] = useState<ApplicationServices>(null)
   const [projects, setProjects] = useState<Project[]>(null)
+  const [classicProject, setClassicProject] = useState<ClassicProjectStatus>()
   const [initialized, setInitialized] = useState(false)
   const [error, setError] = useState<Error>()
   const { projectId } = useParams<{ projectId: string }>()
   const location = useLocation()
+
   const [preloaderText, setPreloader] = useState("Loading application, please be patient...")
+
+  const jitsuNextUrl = process.env.JITSU_NEXT_URL
+  const jitsuNextEeUrl = process.env.JITSU_NEXT_EE_URL
+  const eeClient = useMemo(() => jitsuNextEeUrl ? getJitsuNextEeClient(jitsuNextEeUrl) : undefined,
+      [jitsuNextEeUrl]);
+  const user = services && services.userService.hasUser() ? services.userService.getUser() : undefined
+
+  useEffect(() => {
+    if (process.env.FIREBASE_CONFIG && jitsuNextUrl && eeClient && user) {
+      (async () => {
+        try {
+          const classicProject = await eeClient.checkClassicProject();
+          if (!classicProject.ok) {
+            console.error("Classic project check error", classicProject);
+            return;
+          }
+          console.log("Classic project", classicProject);
+          const customToken = await eeClient.createCustomToken();
+          classicProject.token = customToken;
+          if (!classicProject.active) {
+            window.location.href = jitsuNextUrl + "?token=" + customToken + "&projectName=" + encodeURIComponent(classicProject.name);
+            return;
+          } else {
+            setClassicProject(classicProject);
+            setInitialized(true)
+          }
+        } catch (e) {
+          console.error("Can't check for classic project", e);
+          setInitialized(true)
+        }
+      })()
+    } else if (services) {
+      setInitialized(true)
+    }
+  },[jitsuNextUrl, eeClient, user, services])
 
   useEffect(() => {
     if (location.pathname !== "/sso_callback") {
@@ -145,20 +183,24 @@ export const Application: React.FC = function () {
         try {
           const application = await initializeApplication(description => {
             setPreloader(description)
-          })
+          }, location)
           if (application.userService.hasUser()) {
             const projects = await application.projectService.getAvailableProjects()
             if (projects.length === 0) {
-              const newProject = await application.projectService.createProject(
-                application.userService.getUser().suggestedCompanyName
-              )
-              setProjects([newProject])
+              if (jitsuNextUrl) {
+                window.location.href = jitsuNextUrl
+                return <></>
+              } else {
+                const newProject = await application.projectService.createProject(
+                    application.userService.getUser().suggestedCompanyName
+                )
+                setProjects([newProject])
+              }
             } else {
               setProjects(projects)
             }
           }
           setServices(application)
-          setInitialized(true)
         } catch (e) {
           const msg = `Can't initialize application with backend ${
             process.env.BACKEND_API_BASE || " (BACKEND_API_BASE is not set)"
@@ -223,7 +265,7 @@ export const Application: React.FC = function () {
       </div>
     )
   }
-  const user = services.userService.hasUser() ? services.userService.getUser() : undefined
+
   const jitsuHost = services.applicationConfiguration.rawConfig.keys.jitsu
   if (!services.userService.hasUser()) {
     return (
@@ -289,7 +331,7 @@ export const Application: React.FC = function () {
             )}
           />
           <Route path={"/prj-:projectId"} exact={false}>
-            <ProjectRoute projects={projects} />
+            <ProjectRoute classicProject={classicProject} projects={projects} />
           </Route>
           <Route>
             <ProjectRedirect projects={projects} />
@@ -388,7 +430,7 @@ const PageWrapper: React.FC<{ pageTitle: string; component: ComponentType; pageP
   )
 }
 
-const ProjectRoute: React.FC<{ projects: Project[] }> = ({ projects }) => {
+const ProjectRoute: React.FC<{ projects: Project[], classicProject: ClassicProjectStatus }> = ({ projects, classicProject }) => {
   const services = useServices()
   const [initialized, setInitialized] = useState(false)
   const [error, setError] = useState<Error | undefined>(undefined)
@@ -451,7 +493,7 @@ const ProjectRoute: React.FC<{ projects: Project[] }> = ({ projects }) => {
 
   return (
     <>
-      <ApplicationPage>
+      <ApplicationPage classicProject={classicProject}>
         <Switch>
           {projectRoutes.map(({ component, pageTitle, path, isPrefix }) => (
             <Route

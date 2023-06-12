@@ -1,14 +1,14 @@
 import * as logos from "./logos"
 import { AirbyteSource } from "../types"
 import {
-  githubDocumentation,
-  googleSheetsDocumentation,
-  intercomDocumentation,
-  mixpanelDocumentation,
-  mySqlDocumentation,
-  shopifyDocumentation,
-  slackDocumentation,
-  stripeDocumentation,
+    githubDocumentation, googleServiceAuthDocumentation,
+    googleSheetsDocumentation,
+    intercomDocumentation,
+    mixpanelDocumentation,
+    mySqlDocumentation,
+    shopifyDocumentation,
+    slackDocumentation,
+    stripeDocumentation,
 } from "./documentation"
 import * as React from "react"
 
@@ -836,7 +836,32 @@ export const allAirbyteSources: AirbyteSource[] = [
     stable: false,
     documentation: shopifyDocumentation,
   },
-  {
+    {
+        pic: logos.tap_sftp,
+        docker_image_name: "airbyte/source-sftp",
+        displayName: "SFTP",
+        stable: false,
+    },
+    {
+        pic: logos.tap_sftp,
+        docker_image_name: "airbyte/source-sftp-bulk",
+        displayName: "SFTP Bulk",
+        stable: false,
+    },
+    {
+        pic: logos.facebook,
+        docker_image_name: "airbyte/source-facebook-marketing",
+        displayName: "Facebook Marketing",
+        deprecated: true,
+        stable: false,
+    },
+    {
+        pic: logos.facebook,
+        docker_image_name: "airbyte/source-facebook-pages",
+        displayName: "Facebook Pages",
+        stable: false,
+    },
+    {
     pic: logos.google_adwords,
     docker_image_name: "airbyte/source-google-adwords-singer",
     displayName: "Google AdWords",
@@ -4816,7 +4841,7 @@ export const allAirbyteSources: AirbyteSource[] = [
     },
   },
   {
-    hasNativeEquivalent: true,
+    hasNativeEquivalent: false,
     pic: logos.tap_google_sheets,
     docker_image_name: "airbyte/source-google-sheets",
     displayName: "Google Sheets",
@@ -5018,4 +5043,30 @@ export const allAirbyteSources: AirbyteSource[] = [
       connection: <></>,
     },
   },
+    {
+        pic: logos.woocommerce,
+        docker_image_name: "airbyte/source-woocommerce",
+        displayName: "WooCommerce",
+        stable: false
+    },
+    {
+        pic: logos.google_analytics,
+        docker_image_name: "airbyte/source-google-analytics-data-api",
+        displayName: "Google Analytics (GA4)",
+        stable: false,
+        documentation: {
+            overview: (
+                <>
+                    Google Analytics 4 (GA4) connector is the latest version of Google Analytics, which was introduced in 2020. It offers a new data model that emphasizes events and user properties, rather than pageviews and sessions. This new model allows for more flexible and customizable reporting, as well as more accurate measurement of user behavior across devices and platforms.
+                </>
+            ),
+            connection: googleServiceAuthDocumentation({
+                oauthEnabled: true,
+                serviceAccountEnabled: true,
+                scopes: ["https://www.googleapis.com/auth/analytics.readonly"],
+                serviceName: "Google Analytics (GA4)",
+                apis: ["Google Analytics Data API"],
+            }),
+        },
+    },
 ]

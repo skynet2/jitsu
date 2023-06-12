@@ -7,16 +7,16 @@ import (
 	"errors"
 	"fmt"
 	"github.com/jitsucom/jitsu/server/drivers/base"
-	"github.com/jitsucom/jitsu/server/timestamp"
-	"math"
-	"sort"
-	"strings"
-
 	"github.com/jitsucom/jitsu/server/errorj"
 	"github.com/jitsucom/jitsu/server/logging"
+	"github.com/jitsucom/jitsu/server/timestamp"
 	"github.com/jitsucom/jitsu/server/typing"
 	"github.com/jitsucom/jitsu/server/uuid"
 	sf "github.com/snowflakedb/gosnowflake"
+	"math"
+	"sort"
+	"strings"
+	"time"
 )
 
 const (
@@ -41,10 +41,15 @@ const (
 	dropSFTableTemplate                 = `DROP TABLE %s%s.%s`
 	truncateSFTableTemplate             = `TRUNCATE TABLE IF EXISTS %s.%s`
 	updateSFTemplate                    = `UPDATE %s.%s SET %s WHERE %s = ?`
+
+	sfMaxQueryLength = 1024 * 1024
+	sfMaxPayloadSize = 16 * 1024 * 1024
 )
 
 var (
-	SchemaToSnowflake = map[typing.DataType]string{
+	sfReservedWords    = []string{"all", "alter", "and", "any", "as", "between", "by", "case", "cast", "check", "column", "connect", "constraint", "create", "cross", "current", "current_date", "current_time", "current_timestamp", "current_user", "delete", "distinct", "drop", "else", "exists", "false", "following", "for", "from", "full", "grant", "group", "having", "ilike", "in", "increment", "inner", "insert", "intersect", "into", "is", "join", "lateral", "left", "like", "localtime", "localtimestamp", "minus", "natural", "not", "null", "of", "on", "or", "order", "qualify", "regexp", "revoke", "right", "rlike", "row", "rows", "sample", "select", "set", "some", "start", "table", "tablesample", "then", "to", "trigger", "true", "try_cast", "union", "unique", "update", "using", "values", "when", "whenever", "where", "with"}
+	sfReservedWordsSet = map[string]struct{}{}
+	SchemaToSnowflake  = map[typing.DataType]string{
 		typing.STRING:    "text",
 		typing.INT64:     "bigint",
 		typing.FLOAT64:   "double precision",
@@ -53,6 +58,12 @@ var (
 		typing.UNKNOWN:   "text",
 	}
 )
+
+func init() {
+	for _, word := range sfReservedWords {
+		sfReservedWordsSet[strings.ToUpper(word)] = struct{}{}
+	}
+}
 
 // SnowflakeConfig dto for deserialized datasource config for Snowflake
 type SnowflakeConfig struct {
@@ -348,10 +359,10 @@ func (s *Snowflake) insertSingle(eventContext *EventContext) error {
 	}
 	sort.Strings(columns)
 	for _, name := range columns {
-		value := eventContext.ProcessedEvent[name]
+		column := eventContext.Table.Columns[name]
+		value := s.adaptValue(eventContext.ProcessedEvent[name], column)
 		columnNames = append(columnNames, reformatValue(name))
-
-		castClause := s.getCastClause(name, eventContext.Table.Columns[name])
+		castClause := s.getCastClause(name, column)
 		placeholders = append(placeholders, "?"+castClause)
 		values = append(values, value)
 	}
@@ -470,7 +481,7 @@ func (s *Snowflake) Truncate(tableName string) error {
 		queryLogger: s.queryLogger,
 		ctx:         s.ctx,
 	}
-	statement := fmt.Sprintf(truncateSFTableTemplate, s.config.Db, tableName)
+	statement := fmt.Sprintf(truncateSFTableTemplate, s.config.Schema, tableName)
 	if err := sqlParams.commonTruncate(statement); err != nil {
 		return errorj.TruncateError.Wrap(err, "failed to truncate table").
 			WithProperty(errorj.DBInfo, &ErrorPayload{
@@ -495,8 +506,9 @@ func (s *Snowflake) Update(table *Table, object map[string]interface{}, whereKey
 	sort.Strings(columns)
 
 	for i, name := range columns {
-		value := object[name]
-		castClause := s.getCastClause(name, table.Columns[name])
+		column := table.Columns[name]
+		value := s.adaptValue(object[name], column)
+		castClause := s.getCastClause(name, column)
 		columnNames[i] = reformatValue(name) + "= ?" + castClause
 		values[i] = value
 	}
@@ -527,6 +539,7 @@ func (s *Snowflake) createTableInTransaction(wrappedTx *Transaction, table *Tabl
 	//sorting columns asc
 	sort.Strings(columnsDDL)
 	query := fmt.Sprintf(createSFTableTemplate, s.config.Schema, reformatValue(table.Name), strings.Join(columnsDDL, ","))
+
 	s.queryLogger.LogDDL(query)
 
 	_, err := wrappedTx.tx.ExecContext(s.ctx, query)
@@ -552,23 +565,32 @@ func (s *Snowflake) bulkInsertInTransaction(wrappedTx *Transaction, table *Table
 	valueArgs := make([]interface{}, 0, maxValues)
 	operation := 0
 	operations := int(math.Max(1, float64(valuesAmount)/float64(PostgresValuesLimit)))
+	queryBaseLength := len(fmt.Sprintf(insertSFTemplate, s.config.Schema, table.Name, strings.Join(unformattedColumnNames, "','"), ""))
+	estimatedPayloadSize := 0
 	for _, row := range objects {
 		// if number of values exceeds limit, we have to execute insert query on processed rows
-		if len(valueArgs)+len(unformattedColumnNames) > PostgresValuesLimit {
+		if len(valueArgs)+len(unformattedColumnNames) > PostgresValuesLimit ||
+			placeholdersBuilder.Len()+queryBaseLength >= sfMaxQueryLength ||
+			estimatedPayloadSize >= sfMaxPayloadSize {
 			operation++
 			if err := s.executeInsertInTransaction(wrappedTx, table, unformattedColumnNames, removeLastComma(placeholdersBuilder.String()), valueArgs); err != nil {
 				return errorj.Decorate(err, "middle insert %d of %d in batch", operation, operations)
 			}
 
 			placeholdersBuilder.Reset()
+			estimatedPayloadSize = 0
 			valueArgs = make([]interface{}, 0, maxValues)
 		}
 		_, _ = placeholdersBuilder.WriteString("(")
 
-		for i, column := range unformattedColumnNames {
-			value, _ := row[column]
+		for i, name := range unformattedColumnNames {
+			column := table.Columns[name]
+			value := s.adaptValue(row[name], column)
+			//trying to estimate payload size to avoid exceeding max payload size 16Mb: https://docs.snowflake.com/en/developer-guide/node-js/nodejs-driver-execute
+			//adding 4 bytes to each parameter size just in case (e.g.: to account for the length of the parameters or other extra unfi)
+			estimatedPayloadSize += 4 + len(fmt.Sprint(value))
 			valueArgs = append(valueArgs, value)
-			castClause := s.getCastClause(column, table.Columns[column])
+			castClause := s.getCastClause(name, column)
 
 			_, _ = placeholdersBuilder.WriteString("?" + castClause)
 
@@ -578,7 +600,6 @@ func (s *Snowflake) bulkInsertInTransaction(wrappedTx *Transaction, table *Table
 		}
 		_, _ = placeholdersBuilder.WriteString("),")
 	}
-
 	if len(valueArgs) > 0 {
 		operation++
 		err := s.executeInsertInTransaction(wrappedTx, table, unformattedColumnNames, removeLastComma(placeholdersBuilder.String()), valueArgs)
@@ -613,8 +634,7 @@ func (s *Snowflake) bulkMergeInTransaction(wrappedTx *Transaction, table *Table,
 
 	err = s.bulkInsertInTransaction(wrappedTx, tmpTable, objects)
 	if err != nil {
-		return errorj.Decorate(err, "failed to insert into temporary table").
-			WithProperty(errorj.DBObjects, dbObjects(objects))
+		return errorj.Decorate(err, "failed to insert into temporary table")
 	}
 
 	//insert from select
@@ -723,7 +743,7 @@ func (s *Snowflake) executeInsertInTransaction(wrappedTx *Transaction, table *Ta
 		quotedHeader = append(quotedHeader, reformatValue(columnName))
 	}
 
-	statement := fmt.Sprintf(insertSFTemplate, s.config.Schema, table.Name, strings.Join(quotedHeader, ", "), placeholders)
+	statement := fmt.Sprintf(insertSFTemplate, s.config.Schema, table.Name, strings.Join(quotedHeader, ","), placeholders)
 
 	s.queryLogger.LogQueryWithValues(statement, valueArgs)
 
@@ -788,8 +808,25 @@ func (s *Snowflake) getCastClause(name string, column typing.SQLColumn) string {
 	if ok {
 		return "::" + castType.Type
 	}
+	//if strings.Contains(strings.ToLower(column.Type), "timestamp") {
+	//	return "::" + column.Type
+	//}
 
-	return "::" + column.Type
+	return ""
+}
+
+func (s *Snowflake) adaptValue(value interface{}, column typing.SQLColumn) interface{} {
+	l := strings.ToLower(column.Type)
+	if strings.Contains(l, "text") || strings.Contains(l, "varchar") {
+		switch v := value.(type) {
+		case time.Time:
+			return v.Format(time.RFC3339)
+		default:
+			return fmt.Sprint(v)
+		}
+	}
+
+	return value
 }
 
 // columnDDL returns column DDL (column name, mapped sql type)
@@ -831,6 +868,11 @@ func reformatValue(value string) string {
 			if isNotLetterOrUnderscore(symbol) && isNotNumberOrDollar(symbol) {
 				return `"` + value + `"`
 			}
+		}
+
+		upper := strings.ToUpper(value)
+		if _, ok := sfReservedWordsSet[upper]; ok {
+			return `"` + upper + `"`
 		}
 
 	}

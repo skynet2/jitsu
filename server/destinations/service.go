@@ -59,7 +59,8 @@ type Service struct {
 	//events queues by destination ID
 	queueConsumerByDestinationID map[string]events.Consumer
 
-	strictAuth bool
+	strictAuth            bool
+	globalDestinationsIds map[string]struct{}
 }
 
 // NewTestService returns test instance. It is used only for tests
@@ -94,6 +95,31 @@ func NewService(destinations *viper.Viper, destinationsSource string, storageFac
 			logging.Infof("Clickhouse tls config %s registered", tlsName)
 		}
 	}
+	globalDestinationsIds := make(map[string]struct{})
+
+	rawGd := viper.Get("global_destinations")
+	switch gd := rawGd.(type) {
+	case []interface{}:
+		for _, v := range gd {
+			globalDestinationsIds[fmt.Sprint(v)] = struct{}{}
+		}
+	case []string:
+		for _, v := range gd {
+			globalDestinationsIds[v] = struct{}{}
+		}
+	case string:
+		if gd == "" {
+			break
+		}
+		split := strings.Split(gd, ",")
+		for _, v := range split {
+			globalDestinationsIds[v] = struct{}{}
+		}
+	case nil:
+	default:
+		return nil, fmt.Errorf("global_destinations must be a string or array of strings")
+	}
+
 	service := &Service{
 		mutex: &sync.RWMutex{},
 
@@ -110,7 +136,8 @@ func NewService(destinations *viper.Viper, destinationsSource string, storageFac
 
 		queueConsumerByDestinationID: map[string]events.Consumer{},
 
-		strictAuth: strictAuth,
+		strictAuth:            strictAuth,
+		globalDestinationsIds: globalDestinationsIds,
 	}
 
 	reloadSec := viper.GetInt("server.destinations_reload_sec")
@@ -250,18 +277,12 @@ func (s *Service) init(dc map[string]config.DestinationConfig) {
 
 	//close and remove non-existent (in new config)
 	toDelete := map[string]*Unit{}
+	toReplace := map[string]*Unit{}
 	for unitID, unit := range s.unitsByID {
 		_, ok := dc[unitID]
 		if !ok {
 			toDelete[unitID] = unit
 		}
-	}
-	if len(toDelete) > 0 {
-		s.mutex.Lock()
-		for unitID, unit := range toDelete {
-			s.removeAndClose(unitID, unit)
-		}
-		s.mutex.Unlock()
 	}
 
 	// create or recreate
@@ -276,8 +297,11 @@ func (s *Service) init(dc map[string]config.DestinationConfig) {
 		destinationConfig := d
 		id := destinationID
 
-		//map token -> id
-		if len(destinationConfig.OnlyTokens) > 0 {
+		if _, global := s.globalDestinationsIds[id]; global {
+			logging.Infof("[%s] Global destination – mapped to all tokens.", id)
+			destinationConfig.OnlyTokens = appconfig.Instance.AuthorizationService.GetAllTokenIDs()
+		} else if len(destinationConfig.OnlyTokens) > 0 {
+			//map token -> id
 			destinationConfig.OnlyTokens = appconfig.Instance.AuthorizationService.GetAllIDsByToken(destinationConfig.OnlyTokens)
 		} else if !s.strictAuth {
 			logging.Warnf("[%s] only_tokens aren't provided. All tokens will be stored.", id)
@@ -297,9 +321,7 @@ func (s *Service) init(dc map[string]config.DestinationConfig) {
 				continue
 			}
 			//remove old (for recreation)
-			s.mutex.Lock()
-			s.removeAndClose(id, unit)
-			s.mutex.Unlock()
+			toReplace[id] = unit
 		}
 
 		if !s.strictAuth && len(destinationConfig.OnlyTokens) == 0 {
@@ -378,6 +400,17 @@ func (s *Service) init(dc map[string]config.DestinationConfig) {
 	}
 
 	s.mutex.Lock()
+	if len(toDelete) > 0 {
+		for unitID, unit := range toDelete {
+			s.removeAndClose(unitID, unit)
+			delete(s.unitsByID, unitID)
+		}
+	}
+	if len(toReplace) > 0 {
+		for unitID, unit := range toReplace {
+			s.removeAndClose(unitID, unit)
+		}
+	}
 	s.consumersByTokenID.AddAll(newConsumers)
 	s.batchStoragesByTokenID.AddAll(newStorages)
 	s.synchronousStoragesByTokenID.AddAll(newSynchronousStorages)
@@ -454,7 +487,6 @@ func (s *Service) removeAndClose(destinationID string, unit *Unit) {
 		logging.Errorf("[%s] Error closing unit: %v", destinationID, err)
 	}
 
-	delete(s.unitsByID, destinationID)
 	logging.Infof("[%s] destination has been removed!", destinationID)
 }
 

@@ -3,10 +3,9 @@ package typing
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/jitsucom/jitsu/server/timestamp"
 	"strings"
 	"time"
-
-	"github.com/jitsucom/jitsu/server/timestamp"
 
 	"github.com/jitsucom/jitsu/server/logging"
 )
@@ -137,14 +136,27 @@ func ReformatTimeValue(value interface{}) interface{} {
 		return value
 	}
 
+	l := len(stringValue)
+	if l < len("2006-01-02T15:04:05") || l > len(time.RFC3339Nano) {
+		//strings shorter than shortest of layouts or longer then longest of layouts are obviously not dates
+		return value
+	}
+
+	char := stringValue[0]
+	if char < '0' || char > '9' {
+		return value
+	}
+
 	timeValue, err := time.Parse(time.RFC3339Nano, stringValue)
 	if err == nil {
 		return timeValue
 	}
 
-	timeValue, err = time.Parse(timestamp.GolangLayout, stringValue)
-	if err == nil {
-		return timeValue
+	if l == len(timestamp.GolangLayout) {
+		timeValue, err = time.Parse(timestamp.GolangLayout, stringValue)
+		if err == nil {
+			return timeValue
+		}
 	}
 
 	timeValue, err = time.Parse(timestamp.DBLayout, stringValue)

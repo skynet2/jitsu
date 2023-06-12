@@ -43,7 +43,7 @@ const (
 	AdsCollection      = "ads"
 	fbMaxAttempts      = 2
 
-	fbMarketingAPIVersion      = "v15.0"
+	fbMarketingAPIVersion      = "v16.0"
 	defaultFacebookReportLevel = "ad"
 )
 
@@ -125,6 +125,10 @@ func (fm *FacebookMarketing) GetAllAvailableIntervals() ([]*base.TimeInterval, e
 		intervals = append(intervals, base.NewTimeInterval(schema.DAY, date))
 	}
 	return intervals, nil
+}
+
+func (fm *FacebookMarketing) ReplaceTables() bool {
+	return false
 }
 
 func (fm *FacebookMarketing) GetObjectsFor(interval *base.TimeInterval, objectsLoader base.ObjectsLoader) error {
